@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 30 24% 8%;
+    --foreground: 36 30% 82%;
+    --primary: 32 95% 44%;
+    --primary-foreground: 36 30% 92%;
+    --muted: 32 20% 15%;
+    --muted-foreground: 36 18% 58%;
+    --accent: 26 90% 37%;
+    --border: 36 20% 20%;
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-background text-foreground min-h-screen antialiased;
+    background: radial-gradient(ellipse at top, hsl(30 24% 8%), hsl(30 24% 8%) 60%, hsl(30 15% 12%) 100%);
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-black/40 backdrop-blur-xl border border-white/10 shadow-2xl;
+  }
+  .text-glow {
+    text-shadow: 0 0 20px rgba(217, 119, 6, 0.4);
+  }
+}
