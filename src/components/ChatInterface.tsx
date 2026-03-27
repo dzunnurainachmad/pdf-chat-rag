@@ -2,14 +2,19 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Send, Loader, Bot, User, ChevronDown } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 
 type Message = {
   role: "user" | "assistant";
   content: string;
-  sources?: { content: string; source: string }[];
+  sources?: { content: string; source: string; page?: number; score?: number }[];
 };
 
-export function ChatInterface() {
+type Props = {
+  activeNamespace: string | null;
+};
+
+export function ChatInterface({ activeNamespace }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -42,7 +47,7 @@ export function ChatInterface() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, history }),
+        body: JSON.stringify({ question, history, namespace: activeNamespace }),
       });
 
       if (!res.ok || !res.body) {
@@ -124,7 +129,11 @@ export function ChatInterface() {
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground gap-3">
             <Bot size={40} className="opacity-30" />
-            <p className="text-sm">Ask anything about the uploaded PDF.</p>
+            <p className="text-sm">
+              {activeNamespace
+                ? "Ask anything about the selected PDF."
+                : "Upload and select a PDF to start chatting."}
+            </p>
           </div>
         )}
 
@@ -144,10 +153,14 @@ export function ChatInterface() {
                 className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                   msg.role === "user"
                     ? "bg-primary text-primary-foreground rounded-tr-sm"
-                    : "bg-white/5 border border-white/10 rounded-tl-sm"
+                    : "bg-white/5 border border-white/10 rounded-tl-sm prose prose-invert prose-sm max-w-none"
                 }`}
               >
-                {msg.content}
+                {msg.role === "assistant" ? (
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                ) : (
+                  msg.content
+                )}
                 {/* Blinking cursor while streaming */}
                 {isLoading && msg.role === "assistant" && i === messages.length - 1 && (
                   <span className="inline-block w-0.5 h-4 bg-current ml-0.5 animate-pulse align-middle" />
@@ -176,8 +189,16 @@ export function ChatInterface() {
                           key={j}
                           className="text-xs bg-white/5 border border-white/10 rounded-lg p-3 text-muted-foreground"
                         >
-                          <p className="font-medium text-accent mb-1">
-                            {src.source}
+                          <p className="font-medium text-accent mb-1 flex items-center justify-between">
+                            <span>
+                              {src.source}
+                              {src.page != null ? ` · Page ${src.page}` : ""}
+                            </span>
+                            {src.score != null && (
+                              <span className="text-muted-foreground font-normal">
+                                {src.score}% match
+                              </span>
+                            )}
                           </p>
                           <p className="leading-relaxed">{src.content}</p>
                         </div>

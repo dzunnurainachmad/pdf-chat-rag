@@ -16,6 +16,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
+    const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+    if (file.size > MAX_SIZE) {
+      return NextResponse.json(
+        { error: `File too large. Maximum size is 10 MB (got ${(file.size / 1024 / 1024).toFixed(1)} MB).` },
+        { status: 400 }
+      );
+    }
+
     // 1. Convert File → Buffer and parse PDF text
     //    pdf-parse is listed in serverExternalPackages so Next.js won't bundle it.
     //    Dynamic import avoids any ESM/CJS interop issues at build time.
@@ -26,10 +34,24 @@ export async function POST(req: NextRequest) {
     // pdf-parse 1.x exports the function as module.exports (CJS).
     // Dynamic import wraps CJS exports under `.default`.
     const pdfParse = pdfParseModule.default;
-    const pdfData = await pdfParse(buffer);
 
-    const rawDocs = [new Document({ pageContent: pdfData.text })];
-    console.log(`Extracted ${rawDocs[0].pageContent.length} characters.`);
+    // Capture text per page so chunks can carry page number metadata
+    const pageTexts: string[] = [];
+    await pdfParse(buffer, {
+      pagerender: (pageData: any) =>
+        pageData.getTextContent().then((content: any) => {
+          const text = content.items.map((item: any) => item.str).join(" ");
+          pageTexts.push(text);
+          return text;
+        }),
+    });
+
+    const rawDocs = pageTexts.map(
+      (text, i) =>
+        new Document({ pageContent: text, metadata: { source: file.name, page: i + 1 } })
+    );
+    const totalChars = rawDocs.reduce((sum, d) => sum + d.pageContent.length, 0);
+    console.log(`Extracted ${rawDocs.length} pages, ${totalChars} characters.`);
 
     // 2. Split text into overlapping chunks
     console.log("Splitting text into chunks...");
@@ -40,12 +62,15 @@ export async function POST(req: NextRequest) {
     const docs = await textSplitter.splitDocuments(rawDocs);
     console.log(`Split into ${docs.length} chunks.`);
 
-    const docsWithSource = docs.map((doc: Document) => {
-      doc.metadata.source = file.name;
-      return doc;
-    });
+    // Derive a Pinecone-safe namespace from the filename
+    const namespace = file.name
+      .replace(/\.pdf$/i, "")
+      .replace(/[^a-zA-Z0-9_-]/g, "_")
+      .slice(0, 64);
 
-    // 3. Embed & upsert into Pinecone
+    const docsWithSource = docs;
+
+    // 3. Embed & upsert into Pinecone (scoped to namespace)
     console.log("Connecting to Vector DB...");
     const pinecone = getPineconeClient();
     const pineconeIndex = pinecone.Index(
@@ -57,9 +82,10 @@ export async function POST(req: NextRequest) {
       openAIApiKey: process.env.OPENAI_API_KEY,
     });
 
-    console.log(`Indexing ${docsWithSource.length} chunks into Pinecone...`);
+    console.log(`Indexing ${docsWithSource.length} chunks into namespace "${namespace}"...`);
     await PineconeStore.fromDocuments(docsWithSource, embeddings, {
       pineconeIndex,
+      namespace,
       maxConcurrency: 5,
     });
 
@@ -69,6 +95,8 @@ export async function POST(req: NextRequest) {
       success: true,
       message: `Successfully processed "${file.name}" into ${docs.length} chunks.`,
       chunkCount: docs.length,
+      namespace,
+      fileName: file.name,
     });
   } catch (error: unknown) {
     console.error("Error processing PDF:", error);

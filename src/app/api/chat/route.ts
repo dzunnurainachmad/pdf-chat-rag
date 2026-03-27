@@ -6,7 +6,7 @@ import { getPineconeClient } from "@/lib/pinecone";
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
-  const { question, history = [] } = await req.json();
+  const { question, history = [], namespace } = await req.json();
 
   if (!question || typeof question !== "string") {
     return new Response(JSON.stringify({ error: "No question provided" }), {
@@ -27,18 +27,38 @@ export async function POST(req: NextRequest) {
 
   const vectorStore = await PineconeStore.fromExistingIndex(embeddings, {
     pineconeIndex,
+    ...(namespace ? { namespace } : {}),
   });
 
-  const relevantDocs = await vectorStore.similaritySearch(question, 4);
-  console.log(`Retrieved ${relevantDocs.length} relevant chunks.`);
+  // Build a richer retrieval query by including recent user history
+  const recentUserMessages = history
+    .filter((m: { role: string }) => m.role === "user")
+    .slice(-2)
+    .map((m: { content: string }) => m.content)
+    .join(" ");
+  const retrievalQuery = recentUserMessages
+    ? `${recentUserMessages} ${question}`
+    : question;
 
-  const context = relevantDocs
-    .map((doc, i) => `[Chunk ${i + 1}]\n${doc.pageContent}`)
+  const scoredDocs = await vectorStore.similaritySearchWithScore(retrievalQuery, 4);
+  console.log(`Retrieved ${scoredDocs.length} chunks, scores: ${scoredDocs.map(([, s]) => s.toFixed(3)).join(", ")}`);
+
+  // Filter weak matches but always keep at least 1 result
+  const SCORE_THRESHOLD = 0.5;
+  const filtered =
+    scoredDocs.filter(([, score]) => score >= SCORE_THRESHOLD).length > 0
+      ? scoredDocs.filter(([, score]) => score >= SCORE_THRESHOLD)
+      : scoredDocs.slice(0, 1);
+
+  const context = filtered
+    .map(([doc], i) => `[Chunk ${i + 1}]\n${doc.pageContent}`)
     .join("\n\n");
 
-  const sources = relevantDocs.map((doc) => ({
-    content: doc.pageContent.slice(0, 200) + "…",
+  const sources = filtered.map(([doc, score]) => ({
+    content: doc.pageContent,
     source: doc.metadata?.source ?? "unknown",
+    page: doc.metadata?.page as number | undefined,
+    score: Math.round(score * 100),
   }));
 
   const llm = new ChatOpenAI({
