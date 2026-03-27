@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
 
     // Capture text per page so chunks can carry page number metadata
     const pageTexts: string[] = [];
-    await pdfParse(buffer, {
+    const pdfData = await pdfParse(buffer, {
       pagerender: (pageData: any) =>
         pageData.getTextContent().then((content: any) => {
           const text = content.items.map((item: any) => item.str).join(" ");
@@ -46,12 +46,17 @@ export async function POST(req: NextRequest) {
         }),
     });
 
-    const rawDocs = pageTexts.map(
-      (text, i) =>
-        new Document({ pageContent: text, metadata: { source: file.name, page: i + 1 } })
-    );
+    // Fallback: if pagerender didn't fire (e.g. image-heavy PDFs), use full text
+    const rawDocs =
+      pageTexts.length > 0
+        ? pageTexts.map(
+            (text, i) =>
+              new Document({ pageContent: text, metadata: { source: file.name, page: i + 1 } })
+          )
+        : [new Document({ pageContent: pdfData.text, metadata: { source: file.name } })];
+
     const totalChars = rawDocs.reduce((sum, d) => sum + d.pageContent.length, 0);
-    console.log(`Extracted ${rawDocs.length} pages, ${totalChars} characters.`);
+    console.log(`Extracted ${rawDocs.length} page(s), ${totalChars} characters.`);
 
     // 2. Split text into overlapping chunks
     console.log("Splitting text into chunks...");

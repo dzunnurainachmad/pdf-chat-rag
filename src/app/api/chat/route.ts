@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
   console.log(`Retrieved ${scoredDocs.length} chunks, scores: ${scoredDocs.map(([, s]) => s.toFixed(3)).join(", ")}`);
 
   // Filter weak matches but always keep at least 1 result
-  const SCORE_THRESHOLD = 0.5;
+  const SCORE_THRESHOLD = 0.3;
   const filtered =
     scoredDocs.filter(([, score]) => score >= SCORE_THRESHOLD).length > 0
       ? scoredDocs.filter(([, score]) => score >= SCORE_THRESHOLD)
